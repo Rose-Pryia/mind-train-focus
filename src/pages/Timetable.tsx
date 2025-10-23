@@ -24,7 +24,7 @@ const Timetable = () => {
   const [formData, setFormData] = useState({ subject: "", duration: 1, color: "#2563eb" });
 
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  const hours = Array.from({ length: 19 }, (_, i) => i + 6); // 6 AM to midnight
+  const hours = Array.from({ length: 24 }, (_, i) => i); // 0-23 hours (24-hour format)
 
   const handleSlotClick = (day: string, hour: number) => {
     setSelectedSlot({ day, hour });

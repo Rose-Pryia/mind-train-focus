@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
@@ -11,57 +11,98 @@ interface CheckIn {
   focused: boolean;
 }
 
+interface SessionState {
+  subject: string;
+  totalDuration: number;
+  startTime: number;
+  pausedAt: number | null;
+  totalPausedTime: number;
+  checkIns: CheckIn[];
+  nextCheckInTime: number;
+}
+
 const FocusSession = () => {
   const navigate = useNavigate();
-  const [sessionData, setSessionData] = useState<any>(null);
+  const [sessionState, setSessionState] = useState<SessionState | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
-  const [isActive, setIsActive] = useState(false);
   const [showCheckIn, setShowCheckIn] = useState(false);
-  const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
   const [checkInTimeout, setCheckInTimeout] = useState(30);
-  const [nextCheckInTime, setNextCheckInTime] = useState(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Initialize or resume session
   useEffect(() => {
-    const stored = localStorage.getItem("currentSession");
-    if (stored) {
-      const data = JSON.parse(stored);
-      setSessionData(data);
-      setTimeRemaining(data.duration * 60); // Convert to seconds
-      setIsActive(true);
-      scheduleNextCheckIn();
+    const storedState = localStorage.getItem("activeSessionState");
+    
+    if (storedState) {
+      // Resume existing session
+      const state: SessionState = JSON.parse(storedState);
+      setSessionState(state);
+      
+      // Calculate elapsed time
+      const now = Date.now();
+      const elapsed = state.pausedAt 
+        ? (state.pausedAt - state.startTime - state.totalPausedTime) / 1000
+        : (now - state.startTime - state.totalPausedTime) / 1000;
+      
+      const remaining = Math.max(0, state.totalDuration * 60 - elapsed);
+      setTimeRemaining(remaining);
+      
+      if (remaining <= 0) {
+        endSession();
+      }
     } else {
-      navigate("/timetable");
+      // Start new session from timetable
+      const stored = localStorage.getItem("currentSession");
+      if (stored) {
+        const data = JSON.parse(stored);
+        const now = Date.now();
+        const newState: SessionState = {
+          subject: data.subject,
+          totalDuration: data.duration,
+          startTime: now,
+          pausedAt: null,
+          totalPausedTime: 0,
+          checkIns: [],
+          nextCheckInTime: now + (Math.floor(Math.random() * 600) + 600) * 1000,
+        };
+        
+        setSessionState(newState);
+        setTimeRemaining(data.duration * 60);
+        localStorage.setItem("activeSessionState", JSON.stringify(newState));
+        localStorage.removeItem("currentSession");
+      } else {
+        navigate("/timetable");
+      }
     }
   }, [navigate]);
 
-  const scheduleNextCheckIn = () => {
-    // Random interval between 10-20 minutes (600-1200 seconds)
-    const randomInterval = Math.floor(Math.random() * 600) + 600;
-    setNextCheckInTime(Date.now() + randomInterval * 1000);
-  };
-
+  // Main timer loop
   useEffect(() => {
-    if (!isActive || isPaused) return;
+    if (!sessionState || sessionState.pausedAt) return;
 
-    const interval = setInterval(() => {
-      setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          endSession();
-          return 0;
-        }
-        return prev - 1;
-      });
+    intervalRef.current = setInterval(() => {
+      const now = Date.now();
+      const elapsed = (now - sessionState.startTime - sessionState.totalPausedTime) / 1000;
+      const remaining = Math.max(0, sessionState.totalDuration * 60 - elapsed);
+      
+      setTimeRemaining(remaining);
+
+      if (remaining <= 0) {
+        endSession();
+        return;
+      }
 
       // Check if it's time for a check-in
-      if (Date.now() >= nextCheckInTime && !showCheckIn) {
+      if (now >= sessionState.nextCheckInTime && !showCheckIn) {
         setShowCheckIn(true);
         setCheckInTimeout(30);
       }
     }, 1000);
 
-    return () => clearInterval(interval);
-  }, [isActive, isPaused, nextCheckInTime, showCheckIn]);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [sessionState, showCheckIn]);
 
   useEffect(() => {
     if (!showCheckIn) return;
@@ -80,13 +121,24 @@ const FocusSession = () => {
   }, [showCheckIn]);
 
   const handleCheckInResponse = (focused: boolean) => {
+    if (!sessionState) return;
+
     const newCheckIn: CheckIn = {
       timestamp: Date.now(),
       focused,
     };
-    setCheckIns([...checkIns, newCheckIn]);
+    
+    const now = Date.now();
+    const randomInterval = Math.floor(Math.random() * 600) + 600;
+    const updatedState: SessionState = {
+      ...sessionState,
+      checkIns: [...sessionState.checkIns, newCheckIn],
+      nextCheckInTime: now + randomInterval * 1000,
+    };
+    
+    setSessionState(updatedState);
+    localStorage.setItem("activeSessionState", JSON.stringify(updatedState));
     setShowCheckIn(false);
-    scheduleNextCheckIn();
     
     if (focused) {
       toast.success("Great! Stay focused!");
@@ -95,25 +147,51 @@ const FocusSession = () => {
     }
   };
 
+  const togglePause = () => {
+    if (!sessionState) return;
+
+    const now = Date.now();
+    
+    if (sessionState.pausedAt) {
+      // Resume
+      const pauseDuration = now - sessionState.pausedAt;
+      const updatedState: SessionState = {
+        ...sessionState,
+        pausedAt: null,
+        totalPausedTime: sessionState.totalPausedTime + pauseDuration,
+      };
+      setSessionState(updatedState);
+      localStorage.setItem("activeSessionState", JSON.stringify(updatedState));
+    } else {
+      // Pause
+      const updatedState: SessionState = {
+        ...sessionState,
+        pausedAt: now,
+      };
+      setSessionState(updatedState);
+      localStorage.setItem("activeSessionState", JSON.stringify(updatedState));
+    }
+  };
+
   const endSession = () => {
-    if (!sessionData) return;
+    if (!sessionState) return;
 
     const sessionRecord = {
       id: Date.now().toString(),
-      subject: sessionData.subject,
-      duration: sessionData.duration,
-      startTime: sessionData.startTime,
+      subject: sessionState.subject,
+      duration: sessionState.totalDuration,
+      startTime: sessionState.startTime,
       endTime: Date.now(),
-      checkIns,
-      focusAccuracy: checkIns.length > 0 
-        ? (checkIns.filter(c => c.focused).length / checkIns.length) * 100 
+      checkIns: sessionState.checkIns,
+      focusAccuracy: sessionState.checkIns.length > 0 
+        ? (sessionState.checkIns.filter(c => c.focused).length / sessionState.checkIns.length) * 100 
         : 100,
     };
 
     const history = JSON.parse(localStorage.getItem("sessionHistory") || "[]");
     history.push(sessionRecord);
     localStorage.setItem("sessionHistory", JSON.stringify(history));
-    localStorage.removeItem("currentSession");
+    localStorage.removeItem("activeSessionState");
 
     toast.success("Session completed! 🎉");
     navigate("/analytics");
@@ -125,11 +203,11 @@ const FocusSession = () => {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const progress = sessionData 
-    ? ((sessionData.duration * 60 - timeRemaining) / (sessionData.duration * 60)) * 100 
+  const progress = sessionState 
+    ? ((sessionState.totalDuration * 60 - timeRemaining) / (sessionState.totalDuration * 60)) * 100 
     : 0;
 
-  if (!sessionData) return null;
+  if (!sessionState) return null;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-secondary/10 p-4">
@@ -138,7 +216,7 @@ const FocusSession = () => {
           <h2 className="text-2xl font-semibold text-muted-foreground mb-2">
             Focus Session
           </h2>
-          <h1 className="text-4xl font-bold">{sessionData.subject}</h1>
+          <h1 className="text-4xl font-bold">{sessionState.subject}</h1>
         </div>
 
         <div className="relative w-64 h-64 mx-auto">
@@ -174,18 +252,18 @@ const FocusSession = () => {
             <div>
               <div className="text-6xl font-bold">{formatTime(timeRemaining)}</div>
               <div className="text-sm text-muted-foreground mt-2">
-                {checkIns.length} check-ins
+                {sessionState.checkIns.length} check-ins
               </div>
             </div>
           </div>
         </div>
 
         <div className="flex gap-4 justify-center">
-          {!isPaused ? (
+          {!sessionState.pausedAt ? (
             <Button
               size="lg"
               variant="outline"
-              onClick={() => setIsPaused(true)}
+              onClick={togglePause}
             >
               <Pause className="w-5 h-5 mr-2" />
               Pause
@@ -193,7 +271,7 @@ const FocusSession = () => {
           ) : (
             <Button
               size="lg"
-              onClick={() => setIsPaused(false)}
+              onClick={togglePause}
             >
               <Play className="w-5 h-5 mr-2" />
               Resume
@@ -210,8 +288,8 @@ const FocusSession = () => {
         </div>
 
         <div className="text-sm text-muted-foreground">
-          Focus Accuracy: {checkIns.length > 0 
-            ? `${Math.round((checkIns.filter(c => c.focused).length / checkIns.length) * 100)}%` 
+          Focus Accuracy: {sessionState.checkIns.length > 0 
+            ? `${Math.round((sessionState.checkIns.filter(c => c.focused).length / sessionState.checkIns.length) * 100)}%` 
             : "100%"}
         </div>
       </Card>
@@ -225,7 +303,7 @@ const FocusSession = () => {
           </DialogHeader>
           <div className="space-y-6 py-4">
             <p className="text-center text-muted-foreground">
-              Still working on <span className="font-semibold text-foreground">{sessionData?.subject}</span>?
+              Still working on <span className="font-semibold text-foreground">{sessionState?.subject}</span>?
             </p>
             <div className="text-center text-sm text-muted-foreground">
               Responding in {checkInTimeout}s...
