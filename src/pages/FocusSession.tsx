@@ -70,7 +70,7 @@ const FocusSession = () => {
           pausedAt: null,
           totalPausedTime: 0,
           checkIns: [],
-          nextCheckInTime: now + (Math.floor(Math.random() * 600) + 600) * 1000,
+          nextCheckInTime: now + 15000, // 15 seconds for testing (change to: (Math.floor(Math.random() * 600) + 600) * 1000 for production)
         };
         
         console.log("New session state:", newState);
@@ -138,7 +138,7 @@ const FocusSession = () => {
     };
     
     const now = Date.now();
-    const randomInterval = Math.floor(Math.random() * 600) + 600;
+    const randomInterval = 15; // 15 seconds for testing (change to: Math.floor(Math.random() * 600) + 600 for production)
     const updatedState: SessionState = {
       ...sessionState,
       checkIns: [...sessionState.checkIns, newCheckIn],
