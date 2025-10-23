@@ -1,6 +1,10 @@
 import { NavLink } from "react-router-dom";
-import { Home, Calendar, Timer, BarChart3, History, Settings } from "lucide-react";
+import { Home, Calendar, Timer, BarChart3, History, Settings, User, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import AuthDialog from "./AuthDialog";
+import { useState } from "react";
+import { useEffect } from "react";
 
 const Navigation = () => {
   const navItems = [
@@ -11,6 +15,18 @@ const Navigation = () => {
     { to: "/history", icon: History, label: "History" },
     { to: "/settings", icon: Settings, label: "Settings" },
   ];
+
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    setIsLoggedIn(localStorage.getItem("isLoggedIn") === "true");
+  }, []);
+
+  const handleSignOut = () => {
+    setIsLoggedIn(false);
+    // TODO: Implement actual sign-out logic
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-card/80 backdrop-blur-lg border-b border-border">
@@ -43,9 +59,21 @@ const Navigation = () => {
                 <span className="hidden sm:inline">{item.label}</span>
               </NavLink>
             ))}
+            {isLoggedIn ? (
+              <Button variant="ghost" onClick={handleSignOut} className="flex items-center gap-2">
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={() => setIsAuthDialogOpen(true)} className="flex items-center gap-2">
+                <User className="w-4 h-4" />
+                Sign In
+              </Button>
+            )}
           </div>
         </div>
       </div>
+      <AuthDialog isOpen={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} onAuthSuccess={setIsLoggedIn} />
     </nav>
   );
 };

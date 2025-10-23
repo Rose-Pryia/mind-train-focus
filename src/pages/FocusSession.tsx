@@ -6,6 +6,11 @@ import { CheckCircle2, XCircle, Play, Pause, Square, Timer, Calendar } from "luc
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
+const playNotificationSound = () => {
+  const audio = new Audio("/sounds/notification.wav"); // Corrected to .wav
+  audio.play().catch(error => console.error("Error playing sound:", error));
+};
+
 interface CheckIn {
   timestamp: number;
   focused: boolean;
@@ -28,7 +33,15 @@ const FocusSession = () => {
   const [showCheckIn, setShowCheckIn] = useState(false);
   const [checkInTimeout, setCheckInTimeout] = useState(30);
   const [noSession, setNoSession] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopNotificationSound = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  };
 
   // Initialize or resume session
   useEffect(() => {
@@ -105,6 +118,8 @@ const FocusSession = () => {
       if (now >= sessionState.nextCheckInTime && !showCheckIn) {
         setShowCheckIn(true);
         setCheckInTimeout(30);
+        audioRef.current = new Audio("/sounds/notification.wav");
+        audioRef.current.play().catch(error => console.error("Error playing sound:", error));
       }
     }, 1000);
 
@@ -154,6 +169,7 @@ const FocusSession = () => {
     } else {
       toast("Take a moment to refocus", { icon: "🎯" });
     }
+    stopNotificationSound(); // Stop sound on button click
   };
 
   const togglePause = () => {
@@ -204,6 +220,7 @@ const FocusSession = () => {
 
     toast.success("Session completed! 🎉");
     navigate("/analytics");
+    stopNotificationSound(); // Ensure sound is stopped when session ends
   };
 
   const formatTime = (seconds: number) => {
