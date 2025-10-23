@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
-import { CheckCircle2, XCircle, Play, Pause, Square } from "lucide-react";
+import { CheckCircle2, XCircle, Play, Pause, Square, Timer, Calendar } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -27,6 +27,7 @@ const FocusSession = () => {
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [showCheckIn, setShowCheckIn] = useState(false);
   const [checkInTimeout, setCheckInTimeout] = useState(30);
+  const [noSession, setNoSession] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize or resume session
@@ -78,8 +79,8 @@ const FocusSession = () => {
         localStorage.setItem("activeSessionState", JSON.stringify(newState));
         localStorage.removeItem("currentSession");
       } else {
-        console.log("No session data found, redirecting to timetable");
-        navigate("/timetable");
+        console.log("No session data found");
+        setNoSession(true);
       }
     }
   }, [navigate]);
@@ -214,6 +215,28 @@ const FocusSession = () => {
   const progress = sessionState 
     ? ((sessionState.totalDuration * 60 - timeRemaining) / (sessionState.totalDuration * 60)) * 100 
     : 0;
+
+  if (noSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-secondary/10 p-4">
+        <Card className="w-full max-w-md p-8 text-center space-y-6 bg-card/95 backdrop-blur">
+          <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center">
+            <Timer className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold mb-2">No Active Session</h2>
+            <p className="text-muted-foreground">
+              Start a focus session from your timetable to begin tracking your study time.
+            </p>
+          </div>
+          <Button onClick={() => navigate("/timetable")} size="lg" className="w-full">
+            <Calendar className="w-4 h-4 mr-2" />
+            Go to Timetable
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   if (!sessionState) return null;
 
