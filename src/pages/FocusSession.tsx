@@ -31,10 +31,13 @@ const FocusSession = () => {
 
   // Initialize or resume session
   useEffect(() => {
+    console.log("FocusSession mounted");
     const storedState = localStorage.getItem("activeSessionState");
+    console.log("Active session state:", storedState);
     
     if (storedState) {
       // Resume existing session
+      console.log("Resuming existing session");
       const state: SessionState = JSON.parse(storedState);
       setSessionState(state);
       
@@ -53,8 +56,11 @@ const FocusSession = () => {
     } else {
       // Start new session from timetable
       const stored = localStorage.getItem("currentSession");
+      console.log("Current session data:", stored);
       if (stored) {
+        console.log("Creating new session from timetable data");
         const data = JSON.parse(stored);
+        console.log("Parsed session data:", data);
         const now = Date.now();
         const newState: SessionState = {
           subject: data.subject,
@@ -66,11 +72,13 @@ const FocusSession = () => {
           nextCheckInTime: now + (Math.floor(Math.random() * 600) + 600) * 1000,
         };
         
+        console.log("New session state:", newState);
         setSessionState(newState);
         setTimeRemaining(data.duration * 60);
         localStorage.setItem("activeSessionState", JSON.stringify(newState));
         localStorage.removeItem("currentSession");
       } else {
+        console.log("No session data found, redirecting to timetable");
         navigate("/timetable");
       }
     }

@@ -53,11 +53,15 @@ const Timetable = () => {
   };
 
   const startFocusSession = (slot: TimetableSlot) => {
-    localStorage.setItem("currentSession", JSON.stringify({
+    console.log("Starting focus session for:", slot.subject);
+    const sessionData = {
       subject: slot.subject,
       duration: slot.duration * 60, // Convert to minutes
       startTime: Date.now(),
-    }));
+    };
+    console.log("Saving session data:", sessionData);
+    localStorage.setItem("currentSession", JSON.stringify(sessionData));
+    console.log("Navigating to /focus");
     navigate("/focus");
   };
 
