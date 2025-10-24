@@ -2,31 +2,73 @@ import { Card } from "@/components/ui/card";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { TrendingUp, Clock, Target, Flame } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ProtectedRoute } from '@/components/ProtectedRoute';
+
+// --- NOTE: These imports rely on your external files (UserContext, services/api) ---
+import { useUser } from '@/contexts/UserContext'; 
+import { analyticsAPI, sessionAPI } from '@/services/api';
+// ----------------------------------------------------------------------------------
 
 const Analytics = () => {
-  const [stats, setStats] = useState({
-    totalHours: 0,
-    focusAccuracy: 0,
-    currentStreak: 0,
-    longestStreak: 0,
-  });
+  // --- STATE DECLARATIONS (Moved inside the function) ---
+  // MOCK: Replace this placeholder if you fully implement useUser
+  const { user } = useUser(); 
+  
+  const [weeklyStats, setWeeklyStats] = useState({ total_hours: 0, total_sessions: 0, avg_accuracy: 0 });
+  const [subjectPerformance, setSubjectPerformance] = useState<any[]>([]);
+  const [focusTrend, setFocusTrend] = useState<any[]>([]);
+  const [recentSessions, setRecentSessions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // --- API Data Fetching Logic (Your provided useEffect) ---
   useEffect(() => {
-    const history = JSON.parse(localStorage.getItem("sessionHistory") || "[]");
-    
-    if (history.length > 0) {
-      const totalMinutes = history.reduce((acc: number, session: any) => acc + session.duration, 0);
-      const avgAccuracy = history.reduce((acc: number, session: any) => acc + session.focusAccuracy, 0) / history.length;
-      
-      setStats({
-        totalHours: Math.round(totalMinutes / 60 * 10) / 10,
-        focusAccuracy: Math.round(avgAccuracy),
-        currentStreak: 5, // Simplified for demo
-        longestStreak: 12, // Simplified for demo
-      });
+    // Check for a valid user object to begin fetching
+    if (!user || !user.user_id) {
+        setLoading(false);
+        return;
     }
-  }, []);
+    
+    async function loadAnalytics() {
+      try {
+        const [stats, subjects, trend, sessions] = await Promise.all([
+          analyticsAPI.getWeeklyStats(user.user_id),
+          analyticsAPI.getSubjectPerformance(user.user_id),
+          analyticsAPI.getFocusTrend(user.user_id),
+          sessionAPI.getAll(user.user_id)
+        ]);
+        
+        // Update all state variables with fetched data
+        setWeeklyStats(stats);
+        setSubjectPerformance(subjects);
+        setFocusTrend(trend);
+        setRecentSessions(sessions.slice(0, 10));
+      } catch (error) {
+        console.error('Failed to load analytics:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    loadAnalytics();
+  }, [user]);
 
+  // --- Loading Check (Your provided logic) ---
+  if (loading) {
+    return <div className="flex items-center justify-center h-screen">Loading analytics...</div>;
+  }
+  
+  // --- Derived Stats (for StatCards) ---
+  const stats = {
+    // The previous local storage logic is replaced by deriving from weeklyStats
+    totalHours: Math.round((weeklyStats.total_hours ?? 0) * 10) / 10,
+    focusAccuracy: Math.round(weeklyStats.avg_accuracy ?? 0),
+    currentStreak: 5, // Placeholder - needs actual BE logic
+    longestStreak: 12, // Placeholder - needs actual BE logic
+  };
+
+  // --- Data Transformation for Charts ---
+  
+  // 1. Weekly Data (Mock data kept as backend does not provide day granularity)
   const weeklyData = [
     { day: "Mon", hours: 4.5 },
     { day: "Tue", hours: 3.2 },
@@ -37,23 +79,21 @@ const Analytics = () => {
     { day: "Sun", hours: 3.0 },
   ];
 
-  const accuracyTrend = [
-    { day: 1, accuracy: 75 },
-    { day: 5, accuracy: 82 },
-    { day: 10, accuracy: 88 },
-    { day: 15, accuracy: 85 },
-    { day: 20, accuracy: 92 },
-    { day: 25, accuracy: 95 },
-    { day: 30, accuracy: 93 },
-  ];
+  // 2. Accuracy Trend (Mapped from focusTrend state)
+  const accuracyTrend = focusTrend.map((d, index) => ({
+    day: index + 1,
+    accuracy: Math.round(d.avg_accuracy),
+  }));
 
-  const subjectData = [
-    { name: "Mathematics", value: 30, color: "#2563eb" },
-    { name: "Physics", value: 25, color: "#8b5cf6" },
-    { name: "Chemistry", value: 20, color: "#06b6d4" },
-    { name: "Biology", value: 15, color: "#10b981" },
-    { name: "Other", value: 10, color: "#f59e0b" },
-  ];
+  // 3. Subject Data (Mapped from subjectPerformance state)
+  const pieColors = ["#2563eb", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b"];
+  const subjectData = subjectPerformance.map((entry, index) => ({
+    name: entry.subject,
+    value: entry.total_hours, // Assuming BE returns total_hours in hours
+    color: pieColors[index % pieColors.length],
+  }));
+
+  // --- JSX Structure (Uses derived 'stats', 'weeklyData', 'accuracyTrend', 'subjectData') ---
 
   const StatCard = ({ icon: Icon, label, value, suffix = "" }: any) => (
     <Card className="p-6 bg-gradient-card backdrop-blur">
@@ -73,6 +113,7 @@ const Analytics = () => {
   );
 
   return (
+    <ProtectedRoute>
     <div className="container mx-auto px-4 py-8 mt-16">
       <div className="mb-8">
         <h1 className="text-4xl font-bold mb-2">Analytics Dashboard</h1>
@@ -157,6 +198,7 @@ const Analytics = () => {
         </div>
       </Card>
     </div>
+    </ProtectedRoute>
   );
 };
 

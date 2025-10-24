@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,64 +6,163 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, Play } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
-interface TimetableSlot {
-  id: string;
-  day: string;
-  hour: number;
+// --- API and Context Imports ---
+import { useUser } from '@/contexts/UserContext'; 
+// Import interfaces and API functions from the combined API file
+import { timetableAPI, sessionAPI, TimetableSlot as TimetableSlotType } from '@/services/api'; 
+// -----------------------------
+
+// Refined interface to match backend structure
+interface TimetableSlot extends TimetableSlotType {
+  slot_id: number;
+  user_id: number;
+  day_of_week: string;
+  start_hour: number;
   subject: string;
-  duration: number;
+  duration: number; // Stored in hours (Decimal(3,1))
   color: string;
 }
 
 const Timetable = () => {
   const navigate = useNavigate();
-  const [slots, setSlots] = useState<TimetableSlot[]>([]);
+  // Hooks MUST be declared inside the component function
+  const { user, loading: userLoading } = useUser();
+  
+  // State variables for fetching, loading, and mutations
+  const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [startSessionPending, setStartSessionPending] = useState(false);
+  
+  // Local UI states
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<{ day: string; hour: number } | null>(null);
+  // Renamed to match backend field names
+  const [selectedSlot, setSelectedSlot] = useState<{ day_of_week: string; start_hour: number } | null>(null);
   const [formData, setFormData] = useState({ subject: "", duration: 1, color: "#2563eb" });
 
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  const hours = Array.from({ length: 24 }, (_, i) => i); // 0-23 hours (24-hour format)
+  const hours = Array.from({ length: 24 }, (_, i) => i);
 
-  const handleSlotClick = (day: string, hour: number) => {
-    setSelectedSlot({ day, hour });
+  // --- API Functions and Side Effects ---
+
+  const reloadTimetable = async (userId: number) => {
+    try {
+        const updatedData = await timetableAPI.getAll(userId);
+        setTimetable(updatedData as TimetableSlot[]);
+    } catch (error) {
+        console.error('Failed to reload timetable:', error);
+        toast.error("Failed to reload timetable data.");
+    }
+  }
+
+  // Effect to load timetable data on user login/change
+  useEffect(() => {
+    // Wait until user context is not loading and we have a user
+    if (userLoading) return;
+    
+    if (!user) {
+        setLoading(false);
+        return;
+    }
+    
+    // Initial fetch of the timetable
+    async function loadTimetable() {
+      setLoading(true);
+      await reloadTimetable(user.user_id);
+      setLoading(false);
+    }
+    
+    loadTimetable();
+  }, [user, userLoading]);
+
+  // Function to handle adding a new slot via API
+  const addSlot = async (newSlotData: Omit<TimetableSlot, 'slot_id'>) => {
+    if (!user) return;
+    
+    try {
+      await timetableAPI.add(newSlotData);
+      toast.success("Session added successfully!");
+      // After successful addition, reload the list
+      reloadTimetable(user.user_id); 
+      setIsDialogOpen(false);
+      setFormData({ subject: "", duration: 1, color: "#2563eb" });
+    } catch (error) {
+      console.error('Failed to add slot:', error);
+      toast.error("Failed to add slot.");
+    }
+  };
+
+  const handleSlotClick = (day_of_week: string, start_hour: number) => {
+    if (!user) {
+        toast.warning("Please sign in to plan your timetable.");
+        return;
+    }
+    setSelectedSlot({ day_of_week, start_hour });
     setIsDialogOpen(true);
   };
 
   const handleAddSession = () => {
-    if (!selectedSlot || !formData.subject) return;
+    if (!selectedSlot || !formData.subject || !user) return;
 
-    const newSlot: TimetableSlot = {
-      id: Date.now().toString(),
-      day: selectedSlot.day,
-      hour: selectedSlot.hour,
+    // Data structure must match backend API expected payload
+    const newSlotData = {
+      user_id: user.user_id,
+      day_of_week: selectedSlot.day_of_week,
+      start_hour: selectedSlot.start_hour,
       subject: formData.subject,
       duration: formData.duration,
       color: formData.color,
     };
-
-    setSlots([...slots, newSlot]);
-    setIsDialogOpen(false);
-    setFormData({ subject: "", duration: 1, color: "#2563eb" });
+    
+    // Call the async function to add the slot
+    addSlot(newSlotData);
   };
 
+  // Check if a slot exists for the given day and hour
   const getSlotForCell = (day: string, hour: number) => {
-    return slots.find(slot => slot.day === day && slot.hour === hour);
+    // Match against new field names
+    return timetable.find(slot => slot.day_of_week === day && slot.start_hour === hour);
   };
 
-  const startFocusSession = (slot: TimetableSlot) => {
-    console.log("Starting focus session for:", slot.subject);
-    const sessionData = {
-      subject: slot.subject,
-      duration: slot.duration * 60, // Convert to minutes
-      startTime: Date.now(),
-    };
-    console.log("Saving session data:", sessionData);
-    localStorage.setItem("currentSession", JSON.stringify(sessionData));
-    console.log("Navigating to /focus");
-    navigate("/focus");
+  const startFocusSession = async (slot: TimetableSlot) => {
+    if (!user || startSessionPending) return;
+    
+    setStartSessionPending(true);
+    
+    try {
+      // 1. Create the session record in the database
+      const plannedDurationMinutes = slot.duration * 60; // Convert hours to minutes
+      const result = await sessionAPI.create(user.user_id, slot.subject, plannedDurationMinutes);
+      
+      // 2. Navigate to the Focus Session page using the returned sessionId
+      toast.info(`Starting session for ${slot.subject}...`);
+      navigate(`/focus?sessionId=${result.sessionId}`);
+    } catch (error) {
+      console.error("Failed to start session:", error);
+      toast.error("Failed to start session. Please try again.");
+    } finally {
+      setStartSessionPending(false);
+    }
   };
+
+  // --- Rendering Logic ---
+  
+  if (userLoading || loading) {
+    return <div className="flex items-center justify-center h-screen">Loading timetable...</div>;
+  }
+  
+  if (!user) {
+    return (
+        <div className="container mx-auto px-4 py-8 mt-16 text-center">
+            <h1 className="text-4xl font-bold mb-4">Timetable Builder</h1>
+            <Card className="p-10">
+                <p className="text-xl text-muted-foreground">Please sign in to view and plan your timetable.</p>
+                <Button onClick={() => navigate("/")} className="mt-4">Go to Home/Sign In</Button>
+            </Card>
+        </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 mt-16">
@@ -88,12 +187,14 @@ const Timetable = () => {
                   {hour}:00
                 </div>
                 {days.map(day => {
+                  // Pass the correct fields to the handler
                   const slot = getSlotForCell(day, hour);
                   return (
                     <div
                       key={`${day}-${hour}`}
                       className="relative border border-border rounded-lg p-2 min-h-[60px] cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => !slot && handleSlotClick(day, hour)}
+                      // Uses new field names for selectedSlot state
+                      onClick={() => !slot && handleSlotClick(day, hour)} 
                     >
                       {slot ? (
                         <div
@@ -101,6 +202,7 @@ const Timetable = () => {
                           style={{ backgroundColor: slot.color }}
                         >
                           <span>{slot.subject}</span>
+                          <span className="opacity-80">{slot.duration} hrs</span>
                           <Button
                             size="sm"
                             variant="secondary"
@@ -109,9 +211,10 @@ const Timetable = () => {
                               e.stopPropagation();
                               startFocusSession(slot);
                             }}
+                            disabled={startSessionPending}
                           >
                             <Play className="w-3 h-3 mr-1" />
-                            Start
+                            {startSessionPending ? 'Starting...' : 'Start'}
                           </Button>
                         </div>
                       ) : (
@@ -151,7 +254,7 @@ const Timetable = () => {
                 min="1"
                 max="4"
                 value={formData.duration}
-                onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, duration: parseFloat(e.target.value) || 1 })}
               />
             </div>
             <div>

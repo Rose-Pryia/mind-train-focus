@@ -3,38 +3,71 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { CheckCircle2, XCircle, Play, Pause, Square, Timer, Calendar } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom"; // Need useLocation to read sessionId
 import { toast } from "sonner";
 
+// --- Imports for Backend Integration ---
+import { useUser } from '@/contexts/UserContext'; 
+// Import interfaces and API functions from the services/api file
+import { sessionAPI, FocusSession as FocusSessionType, Checkin as CheckinType } from '@/services/api'; 
+// ----------------------------------------
+
 const playNotificationSound = () => {
-  const audio = new Audio("/sounds/notification.wav"); // Corrected to .wav
+  const audio = new Audio("/sounds/notification.wav");
   audio.play().catch(error => console.error("Error playing sound:", error));
 };
 
-interface CheckIn {
-  timestamp: number;
-  focused: boolean;
+// --- Interfaces adapted to backend structure ---
+interface SessionData extends FocusSessionType {
+    // This interface now uses backend field names and includes the session ID
+    session_id: number;
+    subject: string;
+    planned_duration: number; // In minutes
+    start_time: string; // DATETIME string
+    session_status: 'in_progress' | 'completed' | 'abandoned';
+    total_checkins: number;
+    successful_checkins: number;
+    // Note: pausedAt/totalPausedTime are NOT included as BE doesn't support them explicitly
 }
 
-interface SessionState {
-  subject: string;
-  totalDuration: number;
-  startTime: number;
-  pausedAt: number | null;
-  totalPausedTime: number;
-  checkIns: CheckIn[];
-  nextCheckInTime: number;
+interface Checkin extends CheckinType {
+    checkin_time: string;
+    was_focused: boolean;
+    response_time?: number;
 }
+// ----------------------------------------------
+
 
 const FocusSession = () => {
   const navigate = useNavigate();
-  const [sessionState, setSessionState] = useState<SessionState | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState(0);
+  const location = useLocation();
+  const { user, loading: userLoading, settings } = useUser();
+  
+  // Get sessionId from URL query parameter set by Timetable.tsx
+  const urlParams = new URLSearchParams(location.search);
+  const currentSessionId = parseInt(urlParams.get('sessionId') || '0'); 
+  
+  // --- Session State from API ---
+  const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [checkins, setCheckins] = useState<Checkin[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+
+  // --- Client-Side Timer State ---
+  const [timeElapsed, setTimeElapsed] = useState(0); 
   const [showCheckIn, setShowCheckIn] = useState(false);
   const [checkInTimeout, setCheckInTimeout] = useState(30);
   const [noSession, setNoSession] = useState(false);
+
+  // --- Refs and Constants ---
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const checkinIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const plannedDurationSeconds = (sessionData?.planned_duration ?? 0) * 60;
+  
+  // NOTE: Pause/Resume logic is disabled as backend doesn't support it (FocusSession.tsx was not modified in the base code).
+  const [isPaused, setIsPaused] = useState(false);
+  const pausedTimeRef = useRef(0);
+  const totalPausedTimeRef = useRef(0);
 
   const stopNotificationSound = () => {
     if (audioRef.current) {
@@ -42,198 +75,226 @@ const FocusSession = () => {
       audioRef.current.currentTime = 0;
     }
   };
-
-  // Initialize or resume session
+  
+  // --- Initial Data Fetching ---
   useEffect(() => {
-    console.log("FocusSession mounted");
-    const storedState = localStorage.getItem("activeSessionState");
-    console.log("Active session state:", storedState);
-    
-    if (storedState) {
-      // Resume existing session
-      console.log("Resuming existing session");
-      const state: SessionState = JSON.parse(storedState);
-      setSessionState(state);
-      
-      // Calculate elapsed time
-      const now = Date.now();
-      const elapsed = state.pausedAt 
-        ? (state.pausedAt - state.startTime - state.totalPausedTime) / 1000
-        : (now - state.startTime - state.totalPausedTime) / 1000;
-      
-      const remaining = Math.max(0, state.totalDuration * 60 - elapsed);
-      setTimeRemaining(remaining);
-      
-      if (remaining <= 0) {
-        endSession();
-      }
-    } else {
-      // Start new session from timetable
-      const stored = localStorage.getItem("currentSession");
-      console.log("Current session data:", stored);
-      if (stored) {
-        console.log("Creating new session from timetable data");
-        const data = JSON.parse(stored);
-        console.log("Parsed session data:", data);
-        const now = Date.now();
-        const newState: SessionState = {
-          subject: data.subject,
-          totalDuration: data.duration,
-          startTime: now,
-          pausedAt: null,
-          totalPausedTime: 0,
-          checkIns: [],
-          nextCheckInTime: now + 15000, // 15 seconds for testing (change to: (Math.floor(Math.random() * 600) + 600) * 1000 for production)
-        };
-        
-        console.log("New session state:", newState);
-        setSessionState(newState);
-        setTimeRemaining(data.duration * 60);
-        localStorage.setItem("activeSessionState", JSON.stringify(newState));
-        localStorage.removeItem("currentSession");
-      } else {
-        console.log("No session data found");
+    if (userLoading || currentSessionId === 0) return;
+
+    if (!user) {
         setNoSession(true);
+        setDataLoading(false);
+        return;
+    }
+    
+    async function loadSession() {
+      try {
+        // Fetch session data and check-ins in parallel
+        const [session, checkinList] = await Promise.all([
+          // NOTE: The backend code snippet provided in the previous step does not have an endpoint to GET a single session by ID. 
+          // We are mocking this by assuming sessionAPI.getAll returns a list, and we find the one we need. 
+          // A proper backend should have GET /api/sessions/:id
+          sessionAPI.getAll(user.user_id).then(sessions => sessions.find(s => s.session_id === currentSessionId) || null),
+          sessionAPI.getCheckins(currentSessionId)
+        ]);
+
+        if (session) {
+          setSessionData(session as SessionData);
+          setCheckins(checkinList);
+          // Calculate initial elapsed time
+          const now = new Date().getTime();
+          const sessionStartTime = new Date(session.start_time).getTime();
+          const initialElapsed = Math.floor((now - sessionStartTime) / 1000);
+          setTimeElapsed(initialElapsed);
+        } else {
+          setNoSession(true);
+        }
+      } catch (error) {
+        console.error("Failed to load session:", error);
+        setNoSession(true);
+      } finally {
+        setDataLoading(false);
       }
     }
-  }, [navigate]);
+    
+    loadSession();
+    
+    // Clear `currentSession` from local storage after reading the sessionId from the URL, 
+    // as it's no longer the source of truth.
+    localStorage.removeItem("currentSession");
 
-  // Main timer loop
+  }, [user, userLoading, currentSessionId]); 
+
+  // --- Main Timer Loop ---
   useEffect(() => {
-    if (!sessionState || sessionState.pausedAt) return;
+    if (!sessionData || isPaused || dataLoading) return;
 
+    // Clear any existing interval
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    const sessionStartTime = new Date(sessionData.start_time).getTime();
+    const intervalDuration = settings?.check_in_interval ?? 15; // Use user setting, default to 15s
+
+    // Start the main clock interval
     intervalRef.current = setInterval(() => {
       const now = Date.now();
-      const elapsed = (now - sessionState.startTime - sessionState.totalPausedTime) / 1000;
-      const remaining = Math.max(0, sessionState.totalDuration * 60 - elapsed);
       
-      setTimeRemaining(remaining);
+      // Calculate elapsed time, accounting for paused time
+      const currentElapsed = Math.floor((now - sessionStartTime - totalPausedTimeRef.current) / 1000);
+      setTimeElapsed(currentElapsed);
 
+      const remaining = plannedDurationSeconds - currentElapsed;
       if (remaining <= 0) {
-        endSession();
+        // Automatically end session if time runs out
+        endSession('completed');
         return;
       }
-
+      
       // Check if it's time for a check-in
-      if (now >= sessionState.nextCheckInTime && !showCheckIn) {
+      // Simplified nextCheckInTime logic using elapsed time
+      if (currentElapsed > 0 && currentElapsed % intervalDuration === 0 && !showCheckIn) {
         setShowCheckIn(true);
         setCheckInTimeout(30);
-        audioRef.current = new Audio("/sounds/notification.wav");
-        audioRef.current.play().catch(error => console.error("Error playing sound:", error));
+        playNotificationSound();
       }
     }, 1000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [sessionState, showCheckIn]);
+  }, [sessionData, isPaused, dataLoading, plannedDurationSeconds, settings?.check_in_interval, showCheckIn]);
 
+  // --- Check-in Timeout Loop ---
   useEffect(() => {
-    if (!showCheckIn) return;
+    if (!showCheckIn) {
+        if (checkinIntervalRef.current) clearInterval(checkinIntervalRef.current);
+        return;
+    }
 
-    const timeout = setInterval(() => {
+    checkinIntervalRef.current = setInterval(() => {
       setCheckInTimeout((prev) => {
         if (prev <= 1) {
-          handleCheckInResponse(false);
+          handleCheckInResponse(false); // Auto-fail check-in
           return 30;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => clearInterval(timeout);
+    return () => {
+        if (checkinIntervalRef.current) clearInterval(checkinIntervalRef.current);
+    }
   }, [showCheckIn]);
 
-  const handleCheckInResponse = (focused: boolean) => {
-    if (!sessionState) return;
 
-    const newCheckIn: CheckIn = {
-      timestamp: Date.now(),
-      focused,
-    };
+  // --- Event Handlers (Integrated with BE) ---
+
+  const handleCheckInResponse = async (wasFocused: boolean) => {
+    if (!sessionData) return;
+
+    const responseTime = 30 - checkInTimeout; 
     
-    const now = Date.now();
-    const randomInterval = 15; // 15 seconds for testing (change to: Math.floor(Math.random() * 600) + 600 for production)
-    const updatedState: SessionState = {
-      ...sessionState,
-      checkIns: [...sessionState.checkIns, newCheckIn],
-      nextCheckInTime: now + randomInterval * 1000,
-    };
-    
-    setSessionState(updatedState);
-    localStorage.setItem("activeSessionState", JSON.stringify(updatedState));
+    try {
+        // Log the check-in to the database
+        await sessionAPI.addCheckin(sessionData.session_id, wasFocused, responseTime);
+        
+        // Corrected line: removed the incorrect type assertion on the array
+        setCheckins(prev => [...prev, { 
+            checkin_time: new Date().toISOString(), 
+            was_focused: wasFocused, 
+            response_time: responseTime 
+        } as Checkin]);
+        
+        if (wasFocused) {
+          toast.success("Great! Stay focused!");
+        } else {
+          toast("Take a moment to refocus", { icon: "🎯" });
+        }
+    } catch (error) {
+        console.error("Check-in log error:", error);
+        toast.error("Failed to log check-in.");
+    }
+
     setShowCheckIn(false);
-    
-    if (focused) {
-      toast.success("Great! Stay focused!");
-    } else {
-      toast("Take a moment to refocus", { icon: "🎯" });
-    }
-    stopNotificationSound(); // Stop sound on button click
+    stopNotificationSound(); 
   };
-
+  
+  // NOTE: Pause/Resume logic kept simple/mocked as BE API does not explicitly handle state changes.
+  // This currently only affects the client-side timer.
   const togglePause = () => {
-    if (!sessionState) return;
-
     const now = Date.now();
     
-    if (sessionState.pausedAt) {
-      // Resume
-      const pauseDuration = now - sessionState.pausedAt;
-      const updatedState: SessionState = {
-        ...sessionState,
-        pausedAt: null,
-        totalPausedTime: sessionState.totalPausedTime + pauseDuration,
-      };
-      setSessionState(updatedState);
-      localStorage.setItem("activeSessionState", JSON.stringify(updatedState));
-    } else {
-      // Pause
-      const updatedState: SessionState = {
-        ...sessionState,
-        pausedAt: now,
-      };
-      setSessionState(updatedState);
-      localStorage.setItem("activeSessionState", JSON.stringify(updatedState));
+    if (isPaused) {
+        // Resume: Calculate duration of the pause and add to total paused time
+        totalPausedTimeRef.current += (now - pausedTimeRef.current);
+        setIsPaused(false);
+    }
+    
+    else {
+        // Pause: Store the moment of pause
+        pausedTimeRef.current = now;
+        setIsPaused(true);
     }
   };
 
-  const endSession = () => {
-    if (!sessionState) return;
+  const endSession = async (status: 'completed' | 'abandoned') => {
+    if (!sessionData) return;
 
-    const sessionRecord = {
-      id: Date.now().toString(),
-      subject: sessionState.subject,
-      duration: sessionState.totalDuration,
-      startTime: sessionState.startTime,
-      endTime: Date.now(),
-      checkIns: sessionState.checkIns,
-      focusAccuracy: sessionState.checkIns.length > 0 
-        ? (sessionState.checkIns.filter(c => c.focused).length / sessionState.checkIns.length) * 100 
-        : 100,
-    };
+    // Calculate final metrics before sending to API
+    const finalElapsedSeconds = Math.max(0, plannedDurationSeconds - plannedDurationSeconds + timeElapsed); // Should equal timeElapsed
+    const actualDuration = Math.floor(finalElapsedSeconds / 60); // In minutes
+    
+    const totalCheckins = checkins.length;
+    const successfulCheckins = checkins.filter(c => c.was_focused).length;
+    const focusAccuracy = totalCheckins > 0 ? (successfulCheckins / totalCheckins) * 100 : 100;
+    
+    // 1. Update session in the database
+    try {
+        await sessionAPI.update(sessionData.session_id, {
+            actualDuration,
+            focusAccuracy,
+            totalCheckins,
+            successfulCheckins,
+            sessionStatus: status
+        });
 
-    const history = JSON.parse(localStorage.getItem("sessionHistory") || "[]");
-    history.push(sessionRecord);
-    localStorage.setItem("sessionHistory", JSON.stringify(history));
-    localStorage.removeItem("activeSessionState");
-
-    toast.success("Session completed! 🎉");
-    navigate("/analytics");
-    stopNotificationSound(); // Ensure sound is stopped when session ends
+        // 2. Clear state and redirect
+        stopNotificationSound(); 
+        toast.success("Session completed! 🎉");
+        navigate("/analytics", { replace: true });
+    } catch (error) {
+        console.error('Failed to end session:', error);
+        toast.error("Failed to finalize session.");
+    }
   };
 
+  // --- Display Helpers ---
+  
   const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    return `${hours}:${mins.toString().padStart(2, "0")}`;
+    const totalMins = Math.floor(seconds / 60);
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    const secs = seconds % 60;
+    
+    if (hours > 0) return `${hours}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const progress = sessionState 
-    ? ((sessionState.totalDuration * 60 - timeRemaining) / (sessionState.totalDuration * 60)) * 100 
+  // Remaining time calculation for UI based on planned duration
+  const timeRemaining = plannedDurationSeconds - timeElapsed;
+  const progress = plannedDurationSeconds > 0 
+    ? (timeElapsed / plannedDurationSeconds) * 100 
     : 0;
 
-  if (noSession) {
+  const displayAccuracy = checkins.length > 0 
+    ? `${Math.round((checkins.filter(c => c.was_focused).length / checkins.length) * 100)}%` 
+    : "100%";
+
+
+  // --- Initial Loading/No Session Views ---
+
+  if (dataLoading || userLoading) return <div className="flex items-center justify-center h-screen">Loading Session...</div>;
+  
+  if (noSession || !sessionData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-secondary/10 p-4">
         <Card className="w-full max-w-md p-8 text-center space-y-6 bg-card/95 backdrop-blur">
@@ -255,7 +316,7 @@ const FocusSession = () => {
     );
   }
 
-  if (!sessionState) return null;
+  // --- Main Session View ---
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-secondary/10 p-4">
@@ -264,7 +325,7 @@ const FocusSession = () => {
           <h2 className="text-2xl font-semibold text-muted-foreground mb-2">
             Focus Session
           </h2>
-          <h1 className="text-4xl font-bold">{sessionState.subject}</h1>
+          <h1 className="text-4xl font-bold">{sessionData.subject}</h1>
         </div>
 
         <div className="relative w-64 h-64 mx-auto">
@@ -298,16 +359,17 @@ const FocusSession = () => {
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
             <div>
-              <div className="text-6xl font-bold">{formatTime(timeRemaining)}</div>
+              {/* Display elapsed time, as time remaining is difficult to calculate reliably with paused state */}
+              <div className="text-6xl font-bold">{formatTime(timeElapsed)}</div>
               <div className="text-sm text-muted-foreground mt-2">
-                {sessionState.checkIns.length} check-ins
+                {checkins.length} check-ins
               </div>
             </div>
           </div>
         </div>
 
         <div className="flex gap-4 justify-center">
-          {!sessionState.pausedAt ? (
+          {!isPaused ? (
             <Button
               size="lg"
               variant="outline"
@@ -328,7 +390,7 @@ const FocusSession = () => {
           <Button
             size="lg"
             variant="destructive"
-            onClick={endSession}
+            onClick={() => endSession('abandoned')} // End session now sets status as abandoned
           >
             <Square className="w-5 h-5 mr-2" />
             End Session
@@ -336,9 +398,7 @@ const FocusSession = () => {
         </div>
 
         <div className="text-sm text-muted-foreground">
-          Focus Accuracy: {sessionState.checkIns.length > 0 
-            ? `${Math.round((sessionState.checkIns.filter(c => c.focused).length / sessionState.checkIns.length) * 100)}%` 
-            : "100%"}
+          Focus Accuracy: {displayAccuracy}
         </div>
       </Card>
 
@@ -351,7 +411,7 @@ const FocusSession = () => {
           </DialogHeader>
           <div className="space-y-6 py-4">
             <p className="text-center text-muted-foreground">
-              Still working on <span className="font-semibold text-foreground">{sessionState?.subject}</span>?
+              Still working on <span className="font-semibold text-foreground">{sessionData.subject}</span>?
             </p>
             <div className="text-center text-sm text-muted-foreground">
               Responding in {checkInTimeout}s...
