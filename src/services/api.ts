@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://13.201.34.146:3000/api';
+const API_BASE_URL = 'http://65.0.70.9:3000/api';
 
 // Types
 export interface User {
