@@ -19,6 +19,7 @@ export interface UserSettings {
   min_accuracy: number;
   dark_mode: boolean;
   background_animations: boolean;
+  preferred_prompt_time: string; // New field for preferred prompt time
 }
 
 export interface TimetableSlot {
@@ -96,14 +97,20 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 // User API
 export const userAPI = {
-  login: async (email: string, name: string): Promise<User> => {
+  login: async (email: string, password: string): Promise<User> => {
     return await apiCall<User>('/users/login', {
       method: 'POST',
-      body: JSON.stringify({ email, name }),
+      body: JSON.stringify({ email, password }),
     });
   },
-  
-  // ADD THIS NEW FUNCTION
+
+  register: async (email: string, name: string, password: string): Promise<User> => {
+    return await apiCall<User>('/users/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, name, password }),
+    });
+  },
+
   updateProfile: async (userId: number, name: string, email: string): Promise<User> => {
     return await apiCall<User>(`/users/${userId}`, {
       method: 'PUT',
@@ -127,6 +134,7 @@ export const userAPI = {
         minAccuracy: settings.min_accuracy,
         darkMode: settings.dark_mode,
         backgroundAnimations: settings.background_animations,
+        preferredPromptTime: settings.preferred_prompt_time,
       }),
     });
   },

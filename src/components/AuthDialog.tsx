@@ -1,3 +1,5 @@
+// src/components/AuthDialog.tsx
+
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,32 +12,39 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+// ADD:
+import { useUser } from '@/contexts/UserContext'; 
 
 interface AuthDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onAuthSuccess: (status: boolean) => void;
+  // CRITICAL FIX: Change signature to a simple callback
+  onAuthSuccess: () => void; 
 }
 
 const AuthDialog = ({ isOpen, onOpenChange, onAuthSuccess }: AuthDialogProps) => {
+  const { login, register } = useUser(); // Use context login and register function
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // ADD: Name state for registration
+  const [name, setName] = useState(""); 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => { // Must be async
     e.preventDefault();
-    if (isLogin) {
-      console.log("Login with:", { email, password });
-      // Simulate successful login
-      localStorage.setItem("isLoggedIn", "true");
-      onAuthSuccess(true);
-    } else {
-      console.log("Register with:", { email, password });
-      // Simulate successful registration
-      localStorage.setItem("isLoggedIn", "true");
-      onAuthSuccess(true);
+    
+    try {
+      if (isLogin) {
+        await login(email, password);
+      } else {
+        await register(email, name, password);
+      }
+      onAuthSuccess(); // Signal success back to Navigation to close the modal
+    } catch (error) {
+      console.error("Authentication failed:", error);
+      alert("Sign in failed. Please check your credentials."); 
+      onOpenChange(false); 
     }
-    onOpenChange(false); // Close dialog after submission
   };
 
   return (
@@ -60,6 +69,19 @@ const AuthDialog = ({ isOpen, onOpenChange, onAuthSuccess }: AuthDialogProps) =>
               required
             />
           </div>
+          {/* Include name input only for registration */}
+          {!isLogin && (
+            <div className="grid gap-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                type="text"
+                placeholder="Focus Warrior"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+          )}
           <div className="grid gap-2">
             <Label htmlFor="password">Password</Label>
             <Input

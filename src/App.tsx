@@ -11,6 +11,8 @@ import Analytics from "./pages/Analytics";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+// ADD this import
+import { ProtectedRoute } from "./components/ProtectedRoute"; 
 
 const queryClient = new QueryClient();
 
@@ -23,11 +25,16 @@ const App = () => (
         <Navigation />
         <Routes>
           <Route path="/" element={<Landing />} />
+          
+          {/* UNPROTECTED: Timetable is publicly accessible */}
           <Route path="/timetable" element={<Timetable />} />
-          <Route path="/focus" element={<FocusSession />} />
-          <Route path="/analytics" element={<Analytics />} />
-          <Route path="/history" element={<History />} />
-          <Route path="/settings" element={<Settings />} />
+          
+          {/* PROTECTED ROUTES */}
+          <Route path="/focus" element={<ProtectedRoute><FocusSession /></ProtectedRoute>} />
+          <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -25,6 +25,7 @@ type LocalSettingsState = {
     minAccuracy: number;
     darkMode: boolean;
     backgroundAnimations: boolean;
+    preferredPromptTime: string;
 }
 
 const Settings = () => {
@@ -47,11 +48,13 @@ const Settings = () => {
         minAccuracy: Math.round(settings.min_accuracy),
         darkMode: settings.dark_mode,
         backgroundAnimations: settings.background_animations,
+        preferredPromptTime: settings.preferred_prompt_time || "09:00", // Default to 09:00
       });
     } else if (!user && !userLoading) {
         setLocalSettings({
             name: "Guest", email: "N/A", checkInInterval: 15, randomizeInterval: false, soundAlerts: true,
-            dailyGoal: 4, weeklyGoal: 25, minAccuracy: 80, darkMode: false, backgroundAnimations: true
+            dailyGoal: 4, weeklyGoal: 25, minAccuracy: 80, darkMode: false, backgroundAnimations: true,
+            preferredPromptTime: "09:00",
         });
     }
   }, [user, settings, userLoading]);
@@ -86,6 +89,7 @@ const Settings = () => {
             min_accuracy: localSettings.minAccuracy,
             dark_mode: localSettings.darkMode,
             background_animations: localSettings.backgroundAnimations,
+            preferred_prompt_time: localSettings.preferredPromptTime,
         };
         
         await updateSettings(settingsToUpdate);
@@ -150,7 +154,7 @@ const Settings = () => {
               <Slider
                 value={[s.checkInInterval]}
                 onValueChange={([value]) => handleChange('checkInInterval', value)}
-                min={5}
+                min={1}
                 max={25}
                 step={1}
                 className="mt-2"
@@ -181,6 +185,22 @@ const Settings = () => {
                 onCheckedChange={(checked) => handleChange('soundAlerts', checked)}
                 disabled={!user}
               />
+            </div>
+            {/* New: Preferred Prompt Time */}
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="preferredPromptTime">Preferred Prompt Time</Label>
+                <Input
+                  id="preferredPromptTime"
+                  type="time"
+                  value={s.preferredPromptTime}
+                  onChange={(e) => handleChange('preferredPromptTime', e.target.value)}
+                  disabled={!user}
+                />
+                <p className="text-sm text-muted-foreground mt-1">
+                  Set a specific time of day for your daily prompt.
+                </p>
+              </div>
             </div>
           </div>
         </Card>

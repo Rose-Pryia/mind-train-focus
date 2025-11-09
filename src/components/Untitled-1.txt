@@ -1,0 +1,23 @@
+%{
+#include <stdio.h>
+%}
+
+%%
+[a-zA-Z_]+ {printf("Identifier - %s\n",yytext);}
+("if"|"else") {printf("Keyword - %s\n",yytext);}
+[0-9]+ {printf("Constant - %s\n",yytext);}
+[+-/*] {printf("Operator - %s\n",yytext[0]);}
+("{"|"[") {printf("Left parenthesis - %s\n",yytext);}
+"//".* {printf("Comment - %s\n",yytext);}
+[0-9]+[a-zA-Z_]+ {printf("Invalid - %s\n",yytext);}
+%%
+
+int yywrap(){
+return 1;
+}
+
+int main(){
+printf("Enter:");
+yylex();
+return 0;
+}

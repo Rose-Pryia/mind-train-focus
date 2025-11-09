@@ -1,8 +1,16 @@
 import { useUser } from '@/contexts/UserContext';
-import { LoginPrompt } from './LoginPrompt';
+import AuthDialog from './AuthDialog';
+import { useState, useEffect } from 'react';
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useUser();
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      setIsAuthDialogOpen(true);
+    }
+  }, [loading, user]);
 
   if (loading) {
     return (
@@ -13,7 +21,13 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return <LoginPrompt />;
+    return (
+      <AuthDialog
+        isOpen={isAuthDialogOpen}
+        onOpenChange={setIsAuthDialogOpen}
+        onAuthSuccess={() => setIsAuthDialogOpen(false)}
+      />
+    );
   }
 
   return <>{children}</>;

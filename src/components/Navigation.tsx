@@ -1,12 +1,20 @@
+// src/components/Navigation.tsx
+
 import { NavLink } from "react-router-dom";
 import { Home, Calendar, Timer, BarChart3, History, Settings, User, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import AuthDialog from "./AuthDialog";
 import { useState } from "react";
-import { useEffect } from "react";
+// ADD this import
+import { useUser } from '@/contexts/UserContext'; 
 
 const Navigation = () => {
+  // --- USE CONTEXT FOR AUTH STATE ---
+  // isAuthenticated is true if user is logged in, false otherwise.
+  const { isAuthenticated, logout } = useUser();
+  // ------------------------------------
+
   const navItems = [
     { to: "/", icon: Home, label: "Home" },
     { to: "/timetable", icon: Calendar, label: "Timetable" },
@@ -17,16 +25,18 @@ const Navigation = () => {
   ];
 
   const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  useEffect(() => {
-    setIsLoggedIn(localStorage.getItem("isLoggedIn") === "true");
-  }, []);
+  // REMOVE: const [isLoggedIn, setIsLoggedIn] = useState(false);
+  // REMOVE: useEffect(() => { ... });
 
   const handleSignOut = () => {
-    setIsLoggedIn(false);
-    // TODO: Implement actual sign-out logic
+    logout(); // Use context logout
   };
+  
+  // AuthDialog success handler is now just used to close the dialog
+  const handleAuthSuccess = () => {
+      setIsAuthDialogOpen(false);
+  }
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-card/80 backdrop-blur-lg border-b border-border">
@@ -59,7 +69,8 @@ const Navigation = () => {
                 <span className="hidden sm:inline">{item.label}</span>
               </NavLink>
             ))}
-            {isLoggedIn ? (
+            {/* Conditional rendering based on context's isAuthenticated */}
+            {isAuthenticated ? (
               <Button variant="ghost" onClick={handleSignOut} className="flex items-center gap-2">
                 <LogOut className="w-4 h-4" />
                 Sign Out
@@ -73,7 +84,8 @@ const Navigation = () => {
           </div>
         </div>
       </div>
-      <AuthDialog isOpen={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} onAuthSuccess={setIsLoggedIn} />
+      {/* AuthDialog uses context for login action and signals closure via onAuthSuccess */}
+      <AuthDialog isOpen={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} onAuthSuccess={handleAuthSuccess} />
     </nav>
   );
 };
